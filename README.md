@@ -1,413 +1,178 @@
-# Advanced Blog Management System - Template Project
+# Advanced Blog Management System
 
-Это шаблон дипломного проекта на Go для разработки полнофункциональной системы управления блогом с REST API, JWT аутентификацией и PostgreSQL.
+Дипломный backend-сервис на Go: REST API блога с JWT, PostgreSQL, комментариями и отложенной публикацией постов.
 
-## 📋 Содержание
+## Стек
 
-- [О проекте](#о-проекте)
-- [Структура проекта](#структура-проекта)
-- [Технологический стек](#технологический-стек)
-- [Быстрый старт](#быстрый-старт)
-- [Разработка](#разработка)
-- [API эндпоинты](#api-эндпоинты)
-- [Тестирование](#тестирование)
+- Go 1.21+
+- Chi Router
+- PostgreSQL 15
+- JWT (`golang-jwt/jwt/v5`)
+- bcrypt
+- Docker / Docker Compose
 
-## О проекте
-
-**Advanced Blog Management System** - это дипломный проект для студентов, которые изучают Go, REST API и работу с базами данных. 
-
-Проект включает:
-- ✅ Управление пользователями (регистрация, вход)
-- ✅ Управление постами (создание, редактирование, удаление)
-- ✅ Управление комментариями (создание, редактирование, удаление)
-- ✅ JWT аутентификация и авторизация
-- ✅ Отложенная публикация постов (планировщик)
-- ✅ Логирование и обработка ошибок
-- ✅ Docker контейнеризация
-
-## Структура проекта
+## Архитектура
 
 ```
-template_project/
-├── cmd/api/
-│   └── main.go                 # Точка входа приложения
-├── internal/
-│   ├── handler/                # HTTP обработчики
-│   │   ├── auth_handler.go
-│   │   ├── post_handler.go
-│   │   ├── comment_handler.go
-│   │   └── health.go
-│   ├── middleware/             # HTTP middleware
-│   │   ├── auth.go
-│   │   └── logging.go
-│   ├── model/                  # Модели данных
-│   │   └── models.go
-│   ├── repository/             # Слой доступа к БД
-│   │   ├── interfaces.go
-│   │   ├── user_repo.go
-│   │   ├── post_repo.go
-│   │   └── comment_repo.go
-│   └── service/                # Бизнес-логика
-│       ├── user_service.go
-│       ├── post_service.go
-│       └── comment_service.go
-├── pkg/
-│   ├── auth/                   # Утилиты аутентификации
-│   │   ├── jwt.go
-│   │   └── password.go
-│   └── database/               # Утилиты БД
-│       └── db.go
-├── migrations/                 # SQL миграции
-│   ├── 001_init_schema.sql
-│   └── 002_add_indexes.sql
-├── .env.example                # Пример конфигурации
-├── docker-compose.yml          # Docker Compose
-├── Dockerfile                  # Docker образ
-└── go.mod                      # Зависимости проекта
+Handler → Service → Repository → PostgreSQL
 ```
 
-## Технологический стек
-
-- **Язык:** Go 1.24.5
-- **Веб-фреймворк:** Chi Router
-- **База данных:** PostgreSQL 15
-- **Аутентификация:** JWT (golang-jwt)
-- **Хеширование:** bcrypt (golang.org/x/crypto)
-- **Контейнеризация:** Docker, Docker Compose
-- **Валидация:** go-playground/validator
+Фоновый планировщик (`ticker` + worker pool + `context`) публикует посты с `publish_at <= now`.
 
 ## Быстрый старт
 
-### Предварительные требования
-
-- Go 1.24.5 или выше
-- Docker и Docker Compose
-- Bash или другая оболочка команд
-
-### 1. Подготовка окружения
+### 1. Конфигурация
 
 ```bash
-# Клонировать репозиторий
-git clone <repo-url>
-cd template_project
-
-# Скопировать конфигурацию
 cp .env.example .env
-
-# Установить Go зависимости
 go mod download
 ```
 
-### 2. Запуск БД
+### 2. База данных
 
 ```bash
-# Запустить PostgreSQL в Docker
-docker-compose up -d db
-
-# Подождать пока БД запустится (примерно 15 секунд)
-docker-compose logs db
+docker compose up -d db
+# подождите ~10–15 секунд
+docker compose logs db
 ```
 
-### 3. Разработка и запуск
-
-После реализации всех компонентов:
+### 3. Запуск API
 
 ```bash
-# Запустить приложение
-go run cmd/api/main.go
-
-# Или собрать и запустить
-go build -o api ./cmd/api/main.go
-./api
+go run ./cmd/api
+# или
+make run
 ```
 
-Приложение будет доступно на `http://localhost:8080`
+Сервис: `http://localhost:8080`
 
-### 4. Docker контейнеризация
+### 4. Полный Docker Compose
 
 ```bash
-# Запустить всё через Docker Compose
-docker-compose up --build
-
-# Остановить
-docker-compose down
-
-# Очистить данные БД
-docker-compose down -v
+docker compose up --build
 ```
 
-## Разработка
+## Переменные окружения
 
-### Что уже готово ✅
+| Переменная | Описание | По умолчанию |
+|---|---|---|
+| `DB_HOST` | Хост PostgreSQL | `localhost` |
+| `DB_PORT` | Порт БД | `5432` |
+| `DB_USER` | Пользователь | `postgres` |
+| `DB_PASSWORD` | Пароль | `postgres` |
+| `DB_NAME` | Имя БД | `blog_db` |
+| `DB_SSLMODE` | SSL | `disable` |
+| `JWT_SECRET` | Секрет JWT | обязателен |
+| `SERVER_HOST` | Хост HTTP | `0.0.0.0` |
+| `SERVER_PORT` | Порт HTTP | `8080` |
+| `PUBLISHER_INTERVAL_SEC` | Интервал планировщика | `10` |
+| `PUBLISHER_WORKERS` | Число воркеров | `4` |
 
-- Структура проекта и директории
-- Модели данных (User, Post, Comment)
-- Интерфейсы репозиториев
-- SQL миграции (создание таблиц и индексов)
-- Функции хеширования паролей
-- Обработчик Health Check
-- docker-compose.yml для БД
+Миграции из `migrations/` применяются автоматически при старте.
 
-### Что нужно реализовать ❌
+## API
 
-1. **Репозитории** (internal/repository/) - работа с БД
-2. **Сервисы** (internal/service/) - бизнес-логика
-3. **Middleware** (internal/middleware/) - аутентификация, логирование
-4. **Обработчики** (internal/handler/) - HTTP эндпоинты
-5. **JWT** (pkg/auth/jwt.go) - генерация и валидация токенов
-6. **БД подключение** (pkg/database/db.go) - создание подключения
-7. **Главная функция** (cmd/api/main.go) - инициализация и маршруты
+### Публичные
 
+| Метод | Путь | Описание |
+|---|---|---|
+| GET | `/api/health` | Health check |
+| POST | `/api/register` | Регистрация |
+| POST | `/api/login` | Вход (JWT) |
+| GET | `/api/posts` | Список постов (`limit`, `offset`) |
+| GET | `/api/posts/{id}` | Пост по ID |
+| GET | `/api/users/{id}/posts` | Посты автора |
+| GET | `/api/posts/{postId}/comments` | Комментарии |
 
-## API эндпоинты
+### Защищённые (`Authorization: Bearer <token>`)
 
-### Публичные эндпоинты
+| Метод | Путь | Описание |
+|---|---|---|
+| POST | `/api/posts` | Создать пост |
+| PUT | `/api/posts/{id}` | Обновить (только автор) |
+| DELETE | `/api/posts/{id}` | Удалить (только автор) |
+| POST | `/api/posts/{postId}/comments` | Добавить комментарий |
+| PUT | `/api/comments/{id}` | Обновить комментарий |
+| DELETE | `/api/comments/{id}` | Удалить комментарий |
 
-```
-GET    /api/health                     # Проверка здоровья приложения
-POST   /api/register                   # Регистрация нового пользователя
-POST   /api/login                      # Вход пользователя
-GET    /api/posts                      # Получить все посты
-GET    /api/posts/{id}                 # Получить пост по ID
-GET    /api/users/{id}/posts           # Получить посты пользователя
-GET    /api/posts/{postId}/comments    # Получить комментарии к посту
-```
+### Модели
 
-### Защищенные эндпоинты (требуют Authorization: Bearer <token>)
+- **User**: `id`, `username`, `email`, `password` (bcrypt), timestamps
+- **Post**: `id`, `title`, `content`, `author_id`, `status` (`draft`/`published`), `publish_at`, timestamps
+- **Comment**: `id`, `content`, `post_id`, `author_id`, timestamps
 
-```
-POST   /api/posts                      # Создать пост
-PUT    /api/posts/{id}                 # Обновить пост
-DELETE /api/posts/{id}                 # Удалить пост
-POST   /api/posts/{postId}/comments    # Добавить комментарий
-PUT    /api/comments/{id}              # Обновить комментарий
-DELETE /api/comments/{id}              # Удалить комментарий
-```
+Если при создании поста `publish_at` в будущем — статус `draft`, иначе `published`. Планировщик публикует due-посты конкурентно.
 
-## Тестирование
-
-### Примеры curl команд
+## Примеры curl
 
 ```bash
-# Health check
+# Health
 curl http://localhost:8080/api/health
 
 # Регистрация
 curl -X POST http://localhost:8080/api/register \
   -H "Content-Type: application/json" \
-  -d '{
-    "username": "testuser",
-    "email": "test@example.com",
-    "password": "password123"
-  }'
+  -d '{"username":"testuser","email":"test@example.com","password":"password123"}'
 
-# Вход и получение токена
+# Вход
 curl -X POST http://localhost:8080/api/login \
   -H "Content-Type: application/json" \
-  -d '{
-    "email": "test@example.com",
-    "password": "password123"
-  }'
+  -d '{"email":"test@example.com","password":"password123"}'
 
-# Создание поста (замените TOKEN на реальный токен)
+# Создать пост (подставьте TOKEN)
 curl -X POST http://localhost:8080/api/posts \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer TOKEN" \
-  -d '{
-    "title": "My First Post",
-    "content": "This is my first post"
-  }'
+  -d '{"title":"My First Post","content":"Hello blog"}'
 
-# Получение всех постов
-curl http://localhost:8080/api/posts
+# Отложенная публикация
+curl -X POST http://localhost:8080/api/posts \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer TOKEN" \
+  -d '{"title":"Later","content":"Scheduled","publish_at":"2030-01-01T12:00:00Z"}'
 
-# Получение конкретного поста
-curl http://localhost:8080/api/posts/1
+# Список постов
+curl "http://localhost:8080/api/posts?limit=10&offset=0"
 ```
 
-### Unit тесты
+## Тесты
 
 ```bash
-# Запустить тесты
-go test ./...
-
-# Запустить с подробным выводом
-go test -v ./...
-
-# Проверить на race conditions
-go test -race ./...
-
-# Посмотреть покрытие тестами
+go test ./... -v
+go test ./... -race
 go test ./... -cover
 ```
 
-## Конфигурация
+Покрыто в том числе:
 
-Переменные окружения задаются в файле `.env`:
+- статус публикации при `publish_at`
+- публикация due-постов
+- worker pool планировщика
+- JWT и bcrypt
 
-```env
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_USER=postgres
-DB_PASSWORD=postgres
-DB_NAME=blog_db
-DB_SSLMODE=disable
-
-# JWT
-JWT_SECRET=your-secret-key-change-in-production
-
-# Server
-SERVER_HOST=0.0.0.0
-SERVER_PORT=8080
-
-# Environment
-ENV=development
-```
-
-## Архитектура приложения
-
-Проект использует чистую архитектуру с разделением ответственности:
+## Структура
 
 ```
-┌─────────────────┐
-│  HTTP Requests  │
-└────────┬────────┘
-         │
-┌────────▼────────────────────────┐
-│ Middleware (Auth, Logging, CORS)│
-└────────┬────────────────────────┘
-         │
-┌────────▼─────────────┐
-│ Handlers (HTTP API)  │ ← Парсинг JSON, валидация, HTTP коды
-└────────┬─────────────┘
-         │
-┌────────▼──────────────┐
-│ Services (Business)   │ ← Бизнес-логика, валидация, права
-└────────┬──────────────┘
-         │
-┌────────▼─────────────┐
-│ Repositories (Data)  │ ← SQL запросы, работа с БД
-└────────┬─────────────┘
-         │
-┌────────▼────────┐
-│  PostgreSQL DB  │
-└─────────────────┘
-```
-
-## Базовые концепции
-
-### Context
-
-Все методы БД используют `context.Context` для управления таймаутами и отменой операций:
-
-```go
-user, err := repo.GetByID(ctx, userID)
-```
-
-### Параметризованные запросы
-
-Для защиты от SQL injection используйте параметризованные запросы:
-
-```go
-// ❌ Неправильно
-query := fmt.Sprintf("SELECT * FROM users WHERE id = %d", id)
-
-// ✅ Правильно
-query := "SELECT * FROM users WHERE id = $1"
-db.QueryRow(query, id)
-```
-
-### Обработка ошибок
-
-Всегда проверяйте ошибки:
-
-```go
-if err != nil {
-    if err == sql.ErrNoRows {
-        return nil, nil  // Не найдено - это не ошибка
-    }
-    return nil, fmt.Errorf("failed to query: %w", err)
-}
-```
-
-### JWT токены
-
-Токены генерируются при регистрации/входе и требуются для защищенных операций:
-
-```
-Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+cmd/api/main.go
+internal/handler/
+internal/middleware/
+internal/model/
+internal/repository/
+internal/service/
+pkg/auth/
+pkg/database/
+migrations/
+docker-compose.yml
+.env.example
 ```
 
 ## Полезные команды
 
 ```bash
-# Скачать зависимости
-go mod download
-go mod tidy
-
-# Запустить приложение
-go run cmd/api/main.go
-
-# Собрать приложение
-go build -o api ./cmd/api/main.go
-
-# Запустить тесты
-go test ./... -v
-
-# Просмотреть логи БД
-docker-compose logs db -f
-
-# Подключиться к БД
-docker-compose exec db psql -U postgres -d blog_db
-
-# Остановить все сервисы
-docker-compose down
-
-# Очистить данные БД
-docker-compose down -v
+make db-up          # поднять PostgreSQL
+make run            # запустить API
+make test           # тесты
+make docker-up      # app + db
+docker compose exec db psql -U postgres -d blog_db
+docker compose down -v
 ```
-
-## SQL запросы для ручного тестирования
-
-```sql
--- Подключиться к БД
-docker-compose exec db psql -U postgres -d blog_db
-
--- Просмотреть таблицы
-\dt
-
--- Просмотреть пользователей
-SELECT id, username, email, created_at FROM users;
-
--- Просмотреть посты
-SELECT id, title, status, author_id, created_at FROM posts;
-
--- Просмотреть комментарии
-SELECT id, content, post_id, author_id, created_at FROM comments;
-```
-
-## Критерии успеха
-
-- ✅ Приложение запускается без ошибок
-- ✅ Все 14 API эндпоинтов работают
-- ✅ JWT аутентификация работает правильно
-- ✅ Пользователи могут редактировать только свои посты/комментарии
-- ✅ Тесты проходят (go test ./...)
-- ✅ Нет SQL injection уязвимостей
-- ✅ Правильные HTTP статус коды
-- ✅ Приложение работает в Docker контейнере
-
-## Частые вопросы
-
-**Q: Как добавить нового пользователя вручную?**  
-A: Используйте эндпоинт POST /api/register с валидными данными.
-
-**Q: Как получить JWT токен?**  
-A: Отправьте POST /api/login с email и пароль - токен вернется в ответе.
-
-**Q: Что делать если БД не подключается?**  
-A: Проверьте что docker-compose up запущен и подождите 15-20 секунд.
-
-**Q: Как сбросить БД?**  
-A: Выполните `docker-compose down -v` для удаления всех данных.

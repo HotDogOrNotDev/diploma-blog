@@ -2,6 +2,11 @@ package database
 
 import (
 	"database/sql"
+	"fmt"
+	"log"
+	"os"
+	"path/filepath"
+	"time"
 
 	_ "github.com/lib/pq"
 )
@@ -15,27 +20,64 @@ type Config struct {
 	SSLMode  string
 }
 
-// NewPostgresDB создает новое подключение к PostgreSQL
+// NewPostgresDB создает новое подключение к PostgreSQL.
 func NewPostgresDB(cfg Config) (*sql.DB, error) {
-	// TODO: Реализовать подключение к PostgreSQL
-	// 1. Создать DSN (Data Source Name) строку в формате:
-	//    host=<host> port=<port> user=<user> password=<password> dbname=<dbname> sslmode=<sslmode>
-	// 2. Открыть подключение используя sql.Open("postgres", dsn)
-	// 3. Проверить подключение используя db.Ping()
-	// 4. Если ошибка - вернуть ошибку
-	// 5. Вернуть подключение (*sql.DB)
-	// 6. (Рекомендуется) Установить параметры пула: SetMaxOpenConns(25), SetMaxIdleConns(5)
+	dsn := fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		cfg.Host, cfg.Port, cfg.User, cfg.Password, cfg.DBName, cfg.SSLMode,
+	)
 
-	return nil, nil
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open db: %w", err)
+	}
+
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+	db.SetConnMaxLifetime(5 * time.Minute)
+
+	if err := db.Ping(); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("ping db: %w", err)
+	}
+
+	return db, nil
 }
 
-// RunMigrations выполняет SQL миграции
+// RunMigrations выполняет SQL миграции по порядку.
 func RunMigrations(db *sql.DB, migrations []string) error {
-	// TODO: Реализовать выполнение миграций
-	// 1. Для каждой миграции в списке:
-	//    - Выполнить миграцию используя db.Exec()
-	//    - Если ошибка - залогировать и вернуть ошибку
-	// 2. Вернуть nil если все миграции прошли успешно
-
+	for _, migration := range migrations {
+		if _, err := db.Exec(migration); err != nil {
+			return fmt.Errorf("run migration: %w", err)
+		}
+	}
 	return nil
+}
+
+// LoadMigrationFiles читает SQL-файлы из директории migrations.
+func LoadMigrationFiles(dir string) ([]string, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, fmt.Errorf("read migrations dir: %w", err)
+	}
+
+	var migrations []string
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".sql" {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil, fmt.Errorf("read migration %s: %w", path, err)
+		}
+		log.Printf("loaded migration: %s", entry.Name())
+		migrations = append(migrations, string(content))
+	}
+
+	if len(migrations) == 0 {
+		return nil, fmt.Errorf("no migration files found in %s", dir)
+	}
+
+	return migrations, nil
 }

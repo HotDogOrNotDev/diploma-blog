@@ -1,9 +1,15 @@
 package handler
 
 import (
-	"advanced-blog-management-system/internal/service"
 	"encoding/json"
 	"net/http"
+	"strconv"
+
+	"advanced-blog-management-system/internal/middleware"
+	"advanced-blog-management-system/internal/model"
+	"advanced-blog-management-system/internal/service"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type PostHandler struct {
@@ -17,101 +23,192 @@ func NewPostHandler(postService *service.PostService) *PostHandler {
 }
 
 func (h *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик создания поста
-	// 1. Получить userID из контекста (middleware должно его добавить)
-	// 2. Распарсить JSON в PostCreateRequest
-	// 3. Валидировать данные (req.Validate())
-	// 4. Если валидация не прошла - вернуть 400 Bad Request
-	// 5. Вызвать postService.CreatePost()
-	// 6. Если ошибка - вернуть 500 Internal Server Error
-	// 7. Если успешно - вернуть 201 Created с PostResponse
+	userID, ok := middleware.GetUserIDFromContext(r)
+	if !ok {
+		respondWithError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	var req model.PostCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	post, err := h.postService.CreatePost(r.Context(), &req, userID)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	resp, err := h.postService.BuildPostResponse(r.Context(), post)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, resp)
 }
 
 func (h *PostHandler) GetPost(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик получения поста по ID
-	// 1. Извлечь ID поста из URL параметра (используя chi.URLParam или похожее)
-	// 2. Конвертировать ID в число
-	// 3. Вызвать postService.GetPost()
-	// 4. Если пост не найден - вернуть 404 Not Found
-	// 5. Если ошибка - вернуть 500 Internal Server Error
-	// 6. Если успешно - вернуть 200 OK с PostResponse
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id <= 0 {
+		respondWithError(w, "invalid post id", http.StatusBadRequest)
+		return
+	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	post, err := h.postService.GetPost(r.Context(), id)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	resp, err := h.postService.BuildPostResponse(r.Context(), post)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
 }
 
 func (h *PostHandler) GetAllPosts(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик получения всех постов
-	// 1. Получить параметры limit и offset из query string
-	// 2. Установить defaults: limit=10, offset=0
-	// 3. Валидировать параметры (limit должен быть > 0 и <= 100)
-	// 4. Вызвать postService.GetAllPosts()
-	// 5. Получить количество постов через postService.GetPostsCount()
-	// 6. Вернуть 200 OK с объектом:
-	//    {
-	//      "posts": [...],
-	//      "total": 42,
-	//      "limit": 10,
-	//      "offset": 0
-	//    }
+	limit, offset := parsePagination(r)
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	posts, err := h.postService.GetAllPosts(r.Context(), limit, offset)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	total, err := h.postService.GetPostsCount(r.Context())
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	items, err := h.postService.BuildPostResponses(r.Context(), posts)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"posts":  items,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
 }
 
 func (h *PostHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик обновления поста
-	// 1. Получить userID из контекста
-	// 2. Извлечь ID поста из URL параметра
-	// 3. Распарсить JSON в PostUpdateRequest
-	// 4. Валидировать данные
-	// 5. Вызвать postService.UpdatePost()
-	// 6. Если пост не найден - вернуть 404 Not Found
-	// 7. Если пользователь не автор - вернуть 403 Forbidden
-	// 8. Если ошибка - вернуть 500 Internal Server Error
-	// 9. Если успешно - вернуть 200 OK с обновленным PostResponse
+	userID, ok := middleware.GetUserIDFromContext(r)
+	if !ok {
+		respondWithError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id <= 0 {
+		respondWithError(w, "invalid post id", http.StatusBadRequest)
+		return
+	}
+
+	var req model.PostUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	post, err := h.postService.UpdatePost(r.Context(), id, &req, userID)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	resp, err := h.postService.BuildPostResponse(r.Context(), post)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
 }
 
 func (h *PostHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик удаления поста
-	// 1. Получить userID из контекста
-	// 2. Извлечь ID поста из URL параметра
-	// 3. Вызвать postService.DeletePost()
-	// 4. Если пост не найден - вернуть 404 Not Found
-	// 5. Если пользователь не автор - вернуть 403 Forbidden
-	// 6. Если ошибка - вернуть 500 Internal Server Error
-	// 7. Если успешно - вернуть 204 No Content
+	userID, ok := middleware.GetUserIDFromContext(r)
+	if !ok {
+		respondWithError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	id, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || id <= 0 {
+		respondWithError(w, "invalid post id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.postService.DeletePost(r.Context(), id, userID); err != nil {
+		respondWithAppError(w, err)
+		return
+	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *PostHandler) GetPostsByAuthor(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик получения постов автора
-	// 1. Извлечь ID автора из URL параметра
-	// 2. Получить параметры limit и offset из query string
-	// 3. Установить defaults: limit=10, offset=0
-	// 4. Вызвать postService.GetPostsByAuthor()
-	// 5. Вернуть 200 OK с объектом постов и метаинформацией
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-}
-
-func (h *PostHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(payload)
-}
-
-func (h *PostHandler) respondWithError(w http.ResponseWriter, message string, code int) {
-	type ErrorResponse struct {
-		Error string `json:"error"`
+	authorID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || authorID <= 0 {
+		respondWithError(w, "invalid user id", http.StatusBadRequest)
+		return
 	}
-	h.respondWithJSON(w, code, ErrorResponse{Error: message})
+
+	limit, offset := parsePagination(r)
+
+	posts, err := h.postService.GetPostsByAuthor(r.Context(), authorID, limit, offset)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	total, err := h.postService.GetPostsCountByAuthor(r.Context(), authorID)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	items, err := h.postService.BuildPostResponses(r.Context(), posts)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"posts":  items,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
+}
+
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit = 10
+	offset = 0
+
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > 100 {
+		limit = 100
+	}
+
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+
+	return limit, offset
 }

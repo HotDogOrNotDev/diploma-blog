@@ -41,3 +41,4 @@ temp/
 # Build output
 dist/
 build/
+bin/

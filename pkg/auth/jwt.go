@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -14,24 +15,47 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// GenerateToken создает новый JWT токен
+const tokenTTL = 24 * time.Hour
+
+// GenerateToken создает новый JWT токен.
 func GenerateToken(userID int, email, username, secret string) (string, time.Time, error) {
-	// TODO: Реализовать генерацию JWT токена
-	// 1. Установить время истечения токена (например, 24 часа)
-	// 2. Создать объект Claims с user_id, email, username и сроком действия
-	// 3. Создать новый JWT токен с Claims
-	// 4. Подписать токен используя HS256 и secret
-	// 5. Вернуть строку токена и время истечения
-	return "", time.Time{}, nil
+	expiresAt := time.Now().Add(tokenTTL)
+
+	claims := Claims{
+		UserID:   userID,
+		Email:    email,
+		Username: username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	signed, err := token.SignedString([]byte(secret))
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("sign token: %w", err)
+	}
+
+	return signed, expiresAt, nil
 }
 
-// ValidateToken проверяет и распарсивает JWT токен
+// ValidateToken проверяет и распарсивает JWT токен.
 func ValidateToken(tokenString, secret string) (*Claims, error) {
-	// TODO: Реализовать валидацию JWT токена
-	// 1. Распарсить токен используя jwt.ParseWithClaims
-	// 2. Если ошибка парсинга - вернуть ошибку
-	// 3. Проверить что токен валидный (claims.Valid())
-	// 4. Если невалидный - вернуть ошибку
-	// 5. Вернуть Claims из токена
-	return nil, errors.New("token validation not implemented")
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(secret), nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	claims, ok := token.Claims.(*Claims)
+	if !ok || !token.Valid {
+		return nil, errors.New("invalid token")
+	}
+
+	return claims, nil
 }

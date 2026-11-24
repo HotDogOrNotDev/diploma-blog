@@ -1,7 +1,13 @@
 package middleware
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
+	"strings"
+
+	"advanced-blog-management-system/pkg/auth"
 )
 
 // UserContextKey используется для сохранения данных пользователя в context
@@ -9,49 +15,71 @@ type UserContextKey string
 
 const UserKey UserContextKey = "user"
 
-// AuthMiddleware проверяет JWT токен и добавляет данные пользователя в context
-func AuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Реализовать middleware аутентификации
-		// 1. Получить токен из заголовка Authorization (Bearer <token>)
-		// 2. Если токена нет или формат неверный - вернуть 401
-		// 3. Валидировать токен (использовать jwt.ParseWithClaims)
-		// 4. Если токен невалидный - вернуть 401
-		// 5. Извлечь user_id из claims
-		// 6. Добавить user_id в context запроса
-		// 7. Передать request дальше в цепь middleware
-		next.ServeHTTP(w, r)
-	})
+// AuthMiddleware проверяет JWT токен и добавляет user_id в context.
+func AuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token, err := ExtractToken(r)
+			if err != nil {
+				writeUnauthorized(w, "missing or invalid authorization header")
+				return
+			}
+
+			claims, err := auth.ValidateToken(token, jwtSecret)
+			if err != nil {
+				writeUnauthorized(w, "invalid or expired token")
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), UserKey, claims.UserID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
 }
 
-// OptionalAuthMiddleware проверяет JWT токен если он присутствует, но не обязателен
-func OptionalAuthMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// TODO: Реализовать опциональное middleware аутентификации
-		// 1. Получить токен из заголовка Authorization если присутствует
-		// 2. Если токен есть - валидировать его
-		// 3. Если токен валидный - добавить user_id в context
-		// 4. Если токена нет или он невалидный - просто передать request дальше
-		// 5. Передать request дальше в цепь middleware
-		next.ServeHTTP(w, r)
-	})
+// OptionalAuthMiddleware проверяет JWT токен если он присутствует, но не обязателен.
+func OptionalAuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			token, err := ExtractToken(r)
+			if err == nil {
+				if claims, err := auth.ValidateToken(token, jwtSecret); err == nil {
+					ctx := context.WithValue(r.Context(), UserKey, claims.UserID)
+					r = r.WithContext(ctx)
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
 }
 
-// GetUserFromContext извлекает пользователя из context
+// GetUserIDFromContext извлекает user_id из context.
 func GetUserIDFromContext(r *http.Request) (int, bool) {
-	// TODO: Реализовать извлечение user_id из context
-	// Получить значение из context по ключу UserKey
-	// Попробовать привести его к int
-	// Вернуть user_id и флаг успеха
-	return 0, false
+	value := r.Context().Value(UserKey)
+	if value == nil {
+		return 0, false
+	}
+	userID, ok := value.(int)
+	return userID, ok
 }
 
-// ExtractToken извлекает JWT токен из заголовка Authorization
+// ExtractToken извлекает JWT токен из заголовка Authorization.
 func ExtractToken(r *http.Request) (string, error) {
-	// TODO: Реализовать извлечение токена из заголовка
-	// 1. Получить заголовок Authorization
-	// 2. Проверить что он начинается с "Bearer "
-	// 3. Извлечь токен после "Bearer "
-	// 4. Вернуть токен или ошибку если формат неверный
-	return "", nil
+	header := r.Header.Get("Authorization")
+	if header == "" {
+		return "", errors.New("authorization header is missing")
+	}
+
+	parts := strings.SplitN(header, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
+		return "", errors.New("invalid authorization header format")
+	}
+
+	return parts[1], nil
+}
+
+func writeUnauthorized(w http.ResponseWriter, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusUnauthorized)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
 }

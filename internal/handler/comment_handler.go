@@ -1,10 +1,15 @@
 package handler
 
 import (
-	"advanced-blog-management-system/internal/model"
-	"advanced-blog-management-system/internal/service"
 	"encoding/json"
 	"net/http"
+	"strconv"
+
+	"advanced-blog-management-system/internal/middleware"
+	"advanced-blog-management-system/internal/model"
+	"advanced-blog-management-system/internal/service"
+
+	"github.com/go-chi/chi/v5"
 )
 
 type CommentHandler struct {
@@ -18,89 +23,125 @@ func NewCommentHandler(commentService *service.CommentService) *CommentHandler {
 }
 
 func (h *CommentHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик создания комментария
-	// 1. Получить userID из контекста
-	// 2. Если пользователь не авторизован - вернуть 401 Unauthorized
-	// 3. Получить postID из URL параметра
-	// 4. Распарсить JSON в CommentCreateRequest
-	// 5. Валидировать данные (req.Validate())
-	// 6. Если валидация не прошла - вернуть 400 Bad Request
-	// 7. Вызвать commentService.CreateComment()
-	// 8. Если пост не найден - вернуть 404 Not Found
-	// 9. Если ошибка - вернуть 500 Internal Server Error
-	// 10. Если успешно - вернуть 201 Created с CommentResponse
+	userID, ok := middleware.GetUserIDFromContext(r)
+	if !ok {
+		respondWithError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	postID, err := strconv.Atoi(chi.URLParam(r, "postId"))
+	if err != nil || postID <= 0 {
+		respondWithError(w, "invalid post id", http.StatusBadRequest)
+		return
+	}
 
 	var req model.CommentCreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		respondWithError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	comment, err := h.commentService.CreateComment(r.Context(), &req, postID, userID)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	resp, err := h.commentService.BuildCommentResponse(r.Context(), comment)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusCreated, resp)
 }
 
 func (h *CommentHandler) GetCommentsByPostID(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик получения комментариев к посту
-	// 1. Получить postID из URL параметра
-	// 2. Получить limit и offset из query параметров
-	// 3. Установить defaults: limit=10, offset=0
-	// 4. Валидировать параметры
-	// 5. Вызвать commentService.GetCommentsByPostID()
-	// 6. Получить количество комментариев
-	// 7. Если успешно - вернуть 200 OK с массивом комментариев и метаинформацией
-	//    Формат: {"comments": [...], "total": 15, "limit": 10, "offset": 0}
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-}
-
-func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик обновления комментария
-	// 1. Получить userID из контекста
-	// 2. Если пользователь не авторизован - вернуть 401 Unauthorized
-	// 3. Получить commentID из URL параметра
-	// 4. Распарсить JSON в CommentUpdateRequest
-	// 5. Валидировать данные (req.Validate())
-	// 6. Вызвать commentService.UpdateComment()
-	// 7. Если комментарий не найден - вернуть 404 Not Found
-	// 8. Если пользователь не автор - вернуть 403 Forbidden
-	// 9. Если ошибка - вернуть 500 Internal Server Error
-	// 10. Если успешно - вернуть 200 OK с обновленным CommentResponse
-
-	var req model.CommentUpdateRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
+	postID, err := strconv.Atoi(chi.URLParam(r, "postId"))
+	if err != nil || postID <= 0 {
+		respondWithError(w, "invalid post id", http.StatusBadRequest)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
+	limit, offset := parsePagination(r)
+
+	comments, err := h.commentService.GetCommentsByPostID(r.Context(), postID, limit, offset)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	total, err := h.commentService.GetCommentsCountByPostID(r.Context(), postID)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	items, err := h.commentService.BuildCommentResponses(r.Context(), comments)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, map[string]interface{}{
+		"comments": items,
+		"total":    total,
+		"limit":    limit,
+		"offset":   offset,
+	})
+}
+
+func (h *CommentHandler) UpdateComment(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r)
+	if !ok {
+		respondWithError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	commentID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || commentID <= 0 {
+		respondWithError(w, "invalid comment id", http.StatusBadRequest)
+		return
+	}
+
+	var req model.CommentUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondWithError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	comment, err := h.commentService.UpdateComment(r.Context(), commentID, &req, userID)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	resp, err := h.commentService.BuildCommentResponse(r.Context(), comment)
+	if err != nil {
+		respondWithAppError(w, err)
+		return
+	}
+
+	respondWithJSON(w, http.StatusOK, resp)
 }
 
 func (h *CommentHandler) DeleteComment(w http.ResponseWriter, r *http.Request) {
-	// TODO: Реализовать обработчик удаления комментария
-	// 1. Получить userID из контекста
-	// 2. Если пользователь не авторизован - вернуть 401 Unauthorized
-	// 3. Получить commentID из URL параметра
-	// 4. Вызвать commentService.DeleteComment()
-	// 5. Если комментарий не найден - вернуть 404 Not Found
-	// 6. Если пользователь не автор - вернуть 403 Forbidden
-	// 7. Если ошибка - вернуть 500 Internal Server Error
-	// 8. Если успешно - вернуть 204 No Content
+	userID, ok := middleware.GetUserIDFromContext(r)
+	if !ok {
+		respondWithError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	commentID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil || commentID <= 0 {
+		respondWithError(w, "invalid comment id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.commentService.DeleteComment(r.Context(), commentID, userID); err != nil {
+		respondWithAppError(w, err)
+		return
+	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func (h *CommentHandler) respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(payload)
-}
-
-func (h *CommentHandler) respondWithError(w http.ResponseWriter, message string, code int) {
-	type ErrorResponse struct {
-		Error string `json:"error"`
-	}
-	h.respondWithJSON(w, code, ErrorResponse{Error: message})
 }
