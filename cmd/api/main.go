@@ -157,8 +157,8 @@ func setupRouter(
 		r.Post("/login", authHandler.LoginHandler)
 
 		r.Get("/posts", postHandler.GetAllPosts)
-		r.Get("/posts/{id}", postHandler.GetPost)
-		r.Get("/users/{id}/posts", postHandler.GetPostsByAuthor)
+		r.With(middleware.OptionalAuthMiddleware(jwtSecret)).Get("/posts/{id}", postHandler.GetPost)
+		r.With(middleware.OptionalAuthMiddleware(jwtSecret)).Get("/users/{id}/posts", postHandler.GetPostsByAuthor)
 		r.Get("/posts/{postId}/comments", commentHandler.GetCommentsByPostID)
 
 		r.Group(func(r chi.Router) {

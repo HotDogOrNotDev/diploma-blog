@@ -40,12 +40,12 @@ type PostRepository interface {
 	// GetByID получает пост по ID
 	GetByID(ctx context.Context, id int) (*model.Post, error)
 
-	// GetAll получает все посты с пагинацией
+	// GetAll получает опубликованные посты с пагинацией
 	// limit - количество записей на странице
 	// offset - смещение от начала
 	GetAll(ctx context.Context, limit, offset int) ([]*model.Post, error)
 
-	// GetTotalCount получает общее количество постов
+	// GetTotalCount получает количество опубликованных постов
 	GetTotalCount(ctx context.Context) (int, error)
 
 	// Update обновляет пост
@@ -57,11 +57,12 @@ type PostRepository interface {
 	// Exists проверяет существование поста по ID
 	Exists(ctx context.Context, id int) (bool, error)
 
-	// GetByAuthorID получает посты определенного автора
-	GetByAuthorID(ctx context.Context, authorID int, limit, offset int) ([]*model.Post, error)
+	// GetByAuthorID получает посты автора.
+	// Если includeDrafts=false, возвращаются только опубликованные.
+	GetByAuthorID(ctx context.Context, authorID int, limit, offset int, includeDrafts bool) ([]*model.Post, error)
 
-	// GetTotalCountByAuthorID получает общее количество постов автора
-	GetTotalCountByAuthorID(ctx context.Context, authorID int) (int, error)
+	// GetTotalCountByAuthorID получает количество постов автора.
+	GetTotalCountByAuthorID(ctx context.Context, authorID int, includeDrafts bool) (int, error)
 
 	// GetScheduledPosts получает посты, которые должны быть опубликованы
 	GetScheduledPosts(ctx context.Context) ([]*model.Post, error)

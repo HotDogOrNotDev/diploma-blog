@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
+	"advanced-blog-management-system/internal/errors/apperrors"
 	"advanced-blog-management-system/internal/model"
 )
 
@@ -48,11 +50,35 @@ func (m *mockPostRepo) GetByID(ctx context.Context, id int) (*model.Post, error)
 }
 
 func (m *mockPostRepo) GetAll(ctx context.Context, limit, offset int) ([]*model.Post, error) {
-	return nil, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*model.Post
+	for _, post := range m.posts {
+		if post.Status == model.PostStatusPublished {
+			cp := *post
+			result = append(result, &cp)
+		}
+	}
+	if offset > len(result) {
+		return []*model.Post{}, nil
+	}
+	result = result[offset:]
+	if limit < len(result) {
+		result = result[:limit]
+	}
+	return result, nil
 }
 
 func (m *mockPostRepo) GetTotalCount(ctx context.Context) (int, error) {
-	return 0, nil
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, post := range m.posts {
+		if post.Status == model.PostStatusPublished {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (m *mockPostRepo) Update(ctx context.Context, post *model.Post) error {
@@ -67,12 +93,37 @@ func (m *mockPostRepo) Delete(ctx context.Context, id int) error { return nil }
 
 func (m *mockPostRepo) Exists(ctx context.Context, id int) (bool, error) { return false, nil }
 
-func (m *mockPostRepo) GetByAuthorID(ctx context.Context, authorID int, limit, offset int) ([]*model.Post, error) {
-	return nil, nil
+func (m *mockPostRepo) GetByAuthorID(ctx context.Context, authorID int, limit, offset int, includeDrafts bool) ([]*model.Post, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var result []*model.Post
+	for _, post := range m.posts {
+		if post.AuthorID != authorID {
+			continue
+		}
+		if !includeDrafts && post.Status != model.PostStatusPublished {
+			continue
+		}
+		cp := *post
+		result = append(result, &cp)
+	}
+	return result, nil
 }
 
-func (m *mockPostRepo) GetTotalCountByAuthorID(ctx context.Context, authorID int) (int, error) {
-	return 0, nil
+func (m *mockPostRepo) GetTotalCountByAuthorID(ctx context.Context, authorID int, includeDrafts bool) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	count := 0
+	for _, post := range m.posts {
+		if post.AuthorID != authorID {
+			continue
+		}
+		if !includeDrafts && post.Status != model.PostStatusPublished {
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 
 func (m *mockPostRepo) GetScheduledPosts(ctx context.Context) ([]*model.Post, error) {
@@ -209,6 +260,149 @@ func TestPublishDuePostsAfterPublishAt(t *testing.T) {
 	}
 	if updated.PublishAt != nil {
 		t.Fatal("publish_at must be cleared after publish")
+	}
+}
+
+func TestGetPostHidesDraftFromOthers(t *testing.T) {
+	repo := newMockPostRepo()
+	svc := NewPostService(repo, &stubUserRepo{}, &stubCommentRepo{})
+	ctx := context.Background()
+
+	future := time.Now().Add(time.Hour)
+	draft, err := svc.CreatePost(ctx, &model.PostCreateRequest{
+		Title: "secret", Content: "draft", PublishAt: &future,
+	}, 1)
+	if err != nil {
+		t.Fatalf("CreatePost: %v", err)
+	}
+
+	if _, err := svc.GetPost(ctx, draft.ID, 0); !errors.Is(err, apperrors.ErrPostNotFound) {
+		t.Fatalf("anonymous should get not found, got %v", err)
+	}
+	if _, err := svc.GetPost(ctx, draft.ID, 2); !errors.Is(err, apperrors.ErrPostNotFound) {
+		t.Fatalf("other user should get not found, got %v", err)
+	}
+	got, err := svc.GetPost(ctx, draft.ID, 1)
+	if err != nil || got.Status != model.PostStatusDraft {
+		t.Fatalf("author should see draft, err=%v post=%v", err, got)
+	}
+}
+
+func TestGetAllPostsExcludesDrafts(t *testing.T) {
+	repo := newMockPostRepo()
+	svc := NewPostService(repo, &stubUserRepo{}, &stubCommentRepo{})
+	ctx := context.Background()
+
+	_, _ = svc.CreatePost(ctx, &model.PostCreateRequest{Title: "pub", Content: "x"}, 1)
+	future := time.Now().Add(time.Hour)
+	_, _ = svc.CreatePost(ctx, &model.PostCreateRequest{Title: "draft", Content: "y", PublishAt: &future}, 1)
+
+	posts, err := svc.GetAllPosts(ctx, 10, 0)
+	if err != nil {
+		t.Fatalf("GetAllPosts: %v", err)
+	}
+	if len(posts) != 1 || posts[0].Status != model.PostStatusPublished {
+		t.Fatalf("expected only published posts, got %+v", posts)
+	}
+
+	total, err := svc.GetPostsCount(ctx)
+	if err != nil {
+		t.Fatalf("GetPostsCount: %v", err)
+	}
+	if total != 1 {
+		t.Fatalf("expected total=1, got %d", total)
+	}
+}
+
+func TestGetPostsByAuthorDraftVisibility(t *testing.T) {
+	repo := newMockPostRepo()
+	svc := NewPostService(repo, &stubUserRepo{}, &stubCommentRepo{})
+	ctx := context.Background()
+
+	_, _ = svc.CreatePost(ctx, &model.PostCreateRequest{Title: "pub", Content: "x"}, 1)
+	future := time.Now().Add(time.Hour)
+	_, _ = svc.CreatePost(ctx, &model.PostCreateRequest{Title: "draft", Content: "y", PublishAt: &future}, 1)
+
+	publicView, err := svc.GetPostsByAuthor(ctx, 1, 0, 10, 0)
+	if err != nil {
+		t.Fatalf("public view: %v", err)
+	}
+	if len(publicView) != 1 {
+		t.Fatalf("stranger should see 1 published, got %d", len(publicView))
+	}
+
+	ownerView, err := svc.GetPostsByAuthor(ctx, 1, 1, 10, 0)
+	if err != nil {
+		t.Fatalf("owner view: %v", err)
+	}
+	if len(ownerView) != 2 {
+		t.Fatalf("owner should see drafts too, got %d", len(ownerView))
+	}
+}
+
+func TestGetAllPostsPagination(t *testing.T) {
+	repo := newMockPostRepo()
+	svc := NewPostService(repo, &stubUserRepo{}, &stubCommentRepo{})
+	ctx := context.Background()
+
+	for i := 0; i < 3; i++ {
+		_, err := svc.CreatePost(ctx, &model.PostCreateRequest{Title: "p", Content: "c"}, 1)
+		if err != nil {
+			t.Fatalf("CreatePost: %v", err)
+		}
+	}
+
+	page, err := svc.GetAllPosts(ctx, 2, 0)
+	if err != nil {
+		t.Fatalf("page1: %v", err)
+	}
+	if len(page) != 2 {
+		t.Fatalf("expected limit=2, got %d", len(page))
+	}
+
+	page2, err := svc.GetAllPosts(ctx, 2, 2)
+	if err != nil {
+		t.Fatalf("page2: %v", err)
+	}
+	if len(page2) != 1 {
+		t.Fatalf("expected remaining 1, got %d", len(page2))
+	}
+}
+
+func TestUpdatePostForbiddenForNonAuthor(t *testing.T) {
+	repo := newMockPostRepo()
+	svc := NewPostService(repo, &stubUserRepo{}, &stubCommentRepo{})
+	ctx := context.Background()
+
+	post, err := svc.CreatePost(ctx, &model.PostCreateRequest{Title: "t", Content: "c"}, 1)
+	if err != nil {
+		t.Fatalf("CreatePost: %v", err)
+	}
+
+	title := "hack"
+	_, err = svc.UpdatePost(ctx, post.ID, &model.PostUpdateRequest{Title: &title}, 2)
+	if !errors.Is(err, apperrors.ErrForbidden) {
+		t.Fatalf("expected forbidden, got %v", err)
+	}
+}
+
+func TestUpdatePostPartial(t *testing.T) {
+	repo := newMockPostRepo()
+	svc := NewPostService(repo, &stubUserRepo{}, &stubCommentRepo{})
+	ctx := context.Background()
+
+	post, err := svc.CreatePost(ctx, &model.PostCreateRequest{Title: "old", Content: "body"}, 1)
+	if err != nil {
+		t.Fatalf("CreatePost: %v", err)
+	}
+
+	title := "new"
+	updated, err := svc.UpdatePost(ctx, post.ID, &model.PostUpdateRequest{Title: &title}, 1)
+	if err != nil {
+		t.Fatalf("UpdatePost: %v", err)
+	}
+	if updated.Title != "new" || updated.Content != "body" {
+		t.Fatalf("partial update failed: %+v", updated)
 	}
 }
 

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"advanced-blog-management-system/internal/errors/apperrors"
 	"advanced-blog-management-system/internal/model"
 	"context"
 	"database/sql"
@@ -55,10 +56,11 @@ func (r *postRepository) GetAll(ctx context.Context, limit, offset int) ([]*mode
 	query := `
 		SELECT id, title, content, author_id, status, publish_at, created_at, updated_at
 		FROM posts
+		WHERE status = $1
 		ORDER BY created_at DESC
-		LIMIT $1 OFFSET $2`
+		LIMIT $2 OFFSET $3`
 
-	rows, err := r.db.QueryContext(ctx, query, limit, offset)
+	rows, err := r.db.QueryContext(ctx, query, model.PostStatusPublished, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("get all posts: %w", err)
 	}
@@ -69,7 +71,12 @@ func (r *postRepository) GetAll(ctx context.Context, limit, offset int) ([]*mode
 
 func (r *postRepository) GetTotalCount(ctx context.Context) (int, error) {
 	var count int
-	if err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM posts`).Scan(&count); err != nil {
+	err := r.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM posts WHERE status = $1`,
+		model.PostStatusPublished,
+	).Scan(&count)
+	if err != nil {
 		return 0, fmt.Errorf("get posts count: %w", err)
 	}
 	return count, nil
@@ -102,7 +109,7 @@ func (r *postRepository) Delete(ctx context.Context, id int) error {
 		return fmt.Errorf("delete post rows: %w", err)
 	}
 	if rows == 0 {
-		return sql.ErrNoRows
+		return apperrors.ErrPostNotFound
 	}
 	return nil
 }
@@ -116,15 +123,29 @@ func (r *postRepository) Exists(ctx context.Context, id int) (bool, error) {
 	return exists, nil
 }
 
-func (r *postRepository) GetByAuthorID(ctx context.Context, authorID int, limit, offset int) ([]*model.Post, error) {
-	query := `
-		SELECT id, title, content, author_id, status, publish_at, created_at, updated_at
-		FROM posts
-		WHERE author_id = $1
-		ORDER BY created_at DESC
-		LIMIT $2 OFFSET $3`
+func (r *postRepository) GetByAuthorID(ctx context.Context, authorID int, limit, offset int, includeDrafts bool) ([]*model.Post, error) {
+	var (
+		rows *sql.Rows
+		err  error
+	)
 
-	rows, err := r.db.QueryContext(ctx, query, authorID, limit, offset)
+	if includeDrafts {
+		query := `
+			SELECT id, title, content, author_id, status, publish_at, created_at, updated_at
+			FROM posts
+			WHERE author_id = $1
+			ORDER BY created_at DESC
+			LIMIT $2 OFFSET $3`
+		rows, err = r.db.QueryContext(ctx, query, authorID, limit, offset)
+	} else {
+		query := `
+			SELECT id, title, content, author_id, status, publish_at, created_at, updated_at
+			FROM posts
+			WHERE author_id = $1 AND status = $2
+			ORDER BY created_at DESC
+			LIMIT $3 OFFSET $4`
+		rows, err = r.db.QueryContext(ctx, query, authorID, model.PostStatusPublished, limit, offset)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("get posts by author: %w", err)
 	}
@@ -133,9 +154,19 @@ func (r *postRepository) GetByAuthorID(ctx context.Context, authorID int, limit,
 	return scanPosts(rows)
 }
 
-func (r *postRepository) GetTotalCountByAuthorID(ctx context.Context, authorID int) (int, error) {
+func (r *postRepository) GetTotalCountByAuthorID(ctx context.Context, authorID int, includeDrafts bool) (int, error) {
 	var count int
-	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM posts WHERE author_id = $1`, authorID).Scan(&count)
+	var err error
+
+	if includeDrafts {
+		err = r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM posts WHERE author_id = $1`, authorID).Scan(&count)
+	} else {
+		err = r.db.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM posts WHERE author_id = $1 AND status = $2`,
+			authorID, model.PostStatusPublished,
+		).Scan(&count)
+	}
 	if err != nil {
 		return 0, fmt.Errorf("get posts count by author: %w", err)
 	}

@@ -57,7 +57,8 @@ func (h *PostHandler) GetPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	post, err := h.postService.GetPost(r.Context(), id)
+	viewerID, _ := middleware.GetUserIDFromContext(r)
+	post, err := h.postService.GetPost(r.Context(), id, viewerID)
 	if err != nil {
 		respondWithAppError(w, err)
 		return
@@ -164,14 +165,15 @@ func (h *PostHandler) GetPostsByAuthor(w http.ResponseWriter, r *http.Request) {
 	}
 
 	limit, offset := parsePagination(r)
+	viewerID, _ := middleware.GetUserIDFromContext(r)
 
-	posts, err := h.postService.GetPostsByAuthor(r.Context(), authorID, limit, offset)
+	posts, err := h.postService.GetPostsByAuthor(r.Context(), authorID, viewerID, limit, offset)
 	if err != nil {
 		respondWithAppError(w, err)
 		return
 	}
 
-	total, err := h.postService.GetPostsCountByAuthor(r.Context(), authorID)
+	total, err := h.postService.GetPostsCountByAuthor(r.Context(), authorID, viewerID)
 	if err != nil {
 		respondWithAppError(w, err)
 		return

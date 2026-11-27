@@ -65,10 +65,11 @@ type PostCreateRequest struct {
 	PublishAt *time.Time `json:"publish_at,omitempty"`
 }
 
-// PostUpdateRequest представляет запрос на обновление поста
+// PostUpdateRequest представляет запрос на обновление поста.
+// Поля title/content опциональны — можно обновлять частично.
 type PostUpdateRequest struct {
-	Title     string     `json:"title" validate:"required,min=1,max=200"`
-	Content   string     `json:"content" validate:"required,min=1"`
+	Title     *string    `json:"title,omitempty" validate:"omitempty,min=1,max=200"`
+	Content   *string    `json:"content,omitempty" validate:"omitempty,min=1"`
 	Status    string     `json:"status,omitempty"`
 	PublishAt *time.Time `json:"publish_at,omitempty"`
 }

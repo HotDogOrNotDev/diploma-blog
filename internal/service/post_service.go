@@ -54,12 +54,18 @@ func (s *PostService) CreatePost(ctx context.Context, req *model.PostCreateReque
 	return post, nil
 }
 
-func (s *PostService) GetPost(ctx context.Context, id int) (*model.Post, error) {
+// GetPost возвращает пост по ID.
+// Черновик виден только автору (viewerID); остальным — ErrPostNotFound.
+// viewerID=0 означает анонимного пользователя.
+func (s *PostService) GetPost(ctx context.Context, id int, viewerID int) (*model.Post, error) {
 	post, err := s.postRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	if post == nil {
+		return nil, apperrors.ErrPostNotFound
+	}
+	if post.Status == model.PostStatusDraft && post.AuthorID != viewerID {
 		return nil, apperrors.ErrPostNotFound
 	}
 	return post, nil
@@ -89,8 +95,12 @@ func (s *PostService) UpdatePost(ctx context.Context, id int, req *model.PostUpd
 		return nil, apperrors.ErrForbidden
 	}
 
-	post.Title = req.Title
-	post.Content = req.Content
+	if req.Title != nil {
+		post.Title = *req.Title
+	}
+	if req.Content != nil {
+		post.Content = *req.Content
+	}
 
 	if req.PublishAt != nil && req.PublishAt.After(time.Now()) {
 		post.Status = model.PostStatusDraft
@@ -129,12 +139,16 @@ func (s *PostService) DeletePost(ctx context.Context, id int, userID int) error 
 	return s.postRepo.Delete(ctx, id)
 }
 
-func (s *PostService) GetPostsByAuthor(ctx context.Context, authorID int, limit, offset int) ([]*model.Post, error) {
-	return s.postRepo.GetByAuthorID(ctx, authorID, limit, offset)
+// GetPostsByAuthor возвращает посты автора.
+// Черновики включаются только если viewerID == authorID.
+func (s *PostService) GetPostsByAuthor(ctx context.Context, authorID int, viewerID int, limit, offset int) ([]*model.Post, error) {
+	includeDrafts := viewerID == authorID
+	return s.postRepo.GetByAuthorID(ctx, authorID, limit, offset, includeDrafts)
 }
 
-func (s *PostService) GetPostsCountByAuthor(ctx context.Context, authorID int) (int, error) {
-	return s.postRepo.GetTotalCountByAuthorID(ctx, authorID)
+func (s *PostService) GetPostsCountByAuthor(ctx context.Context, authorID int, viewerID int) (int, error) {
+	includeDrafts := viewerID == authorID
+	return s.postRepo.GetTotalCountByAuthorID(ctx, authorID, includeDrafts)
 }
 
 func (s *PostService) BuildPostResponse(ctx context.Context, post *model.Post) (*model.PostResponse, error) {

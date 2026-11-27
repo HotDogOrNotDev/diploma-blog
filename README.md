@@ -4,7 +4,7 @@
 
 ## Стек
 
-- Go 1.21+
+- Go 1.24.5+
 - Chi Router
 - PostgreSQL 15
 - JWT (`golang-jwt/jwt/v5`)
@@ -102,6 +102,8 @@ docker compose up --build
 - **Comment**: `id`, `content`, `post_id`, `author_id`, timestamps
 
 Если при создании поста `publish_at` в будущем — статус `draft`, иначе `published`. Планировщик публикует due-посты конкурентно.
+
+Публичные списки (`GET /api/posts`, чужой `GET /api/users/{id}/posts`) и `GET /api/posts/{id}` отдают только `published`. Черновик виден автору по ID и в своём списке постов (при JWT).
 
 ## Примеры curl
 
